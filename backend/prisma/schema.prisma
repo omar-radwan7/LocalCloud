@@ -1,0 +1,77 @@
+// Prisma schema for Local Cloud Storage
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  password       String
+  name           String?
+  storageLimitMb Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  files          File[]
+  folders        Folder[]
+}
+
+model File {
+  id           String        @id @default(uuid())
+  userId       String
+  folderId     String?
+  name         String
+  originalName String
+  size         Int
+  mimeType     String?
+  content      Bytes
+  contentHash  String?
+  isDeleted    Boolean       @default(false)
+  deletedAt    DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder       Folder?       @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  versions     FileVersion[]
+
+  @@index([userId])
+  @@index([isDeleted])
+  @@index([folderId])
+  @@index([contentHash])
+}
+
+model FileVersion {
+  id        String   @id @default(uuid())
+  fileId    String
+  size      Int
+  version   Int
+  mimeType  String?
+  content   Bytes
+  createdAt DateTime @default(now())
+  file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@index([fileId])
+}
+
+model Folder {
+  id        String    @id @default(uuid())
+  userId    String
+  name      String
+  parentId  String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Folder?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[]  @relation("FolderHierarchy")
+  files     File[]
+
+  @@index([userId])
+  @@index([parentId])
+  @@unique([userId, name, parentId])
+}
+
