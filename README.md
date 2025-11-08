@@ -152,3 +152,4 @@ Future Enhancements
 You could extend this project by adding file previews for images and PDFs, folder organization, file sharing between users, real-time synchronization, encryption for stored files, or a command-line tool for automated syncing. The current version provides a solid foundation that you can build upon based on your needs.
 
 # LocalCloud
+# LocalCloud
