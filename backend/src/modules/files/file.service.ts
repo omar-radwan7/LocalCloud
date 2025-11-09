@@ -1,5 +1,6 @@
 import prisma from '../../config/database';
 import crypto from 'crypto';
+import { pythonService } from '../../services/pythonService';
 
 const MB_IN_BYTES = 1024 * 1024;
 const defaultLimitMb = Number(process.env.DEFAULT_STORAGE_LIMIT_MB || '5120');
@@ -7,7 +8,37 @@ const defaultLimitMb = Number(process.env.DEFAULT_STORAGE_LIMIT_MB || '5120');
 const sanitizeSegment = (segment: string) =>
   segment.replace(/[^a-zA-Z0-9-_]/g, '_').trim() || 'folder';
 
+interface FileRecord {
+  id: string;
+  name: string;
+  originalName: string;
+  folderId: string | null;
+  size: number;
+  mimeType: string | null;
+  isDeleted: boolean;
+  deletedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  summary: string | null;
+  tags: string | null;
+}
+
 export class FileService {
+  private fileSelect = {
+    id: true,
+    name: true,
+    originalName: true,
+    folderId: true,
+    size: true,
+    mimeType: true,
+    isDeleted: true,
+    deletedAt: true,
+    createdAt: true,
+    updatedAt: true,
+    summary: true,
+    tags: true,
+  } as const;
+
   private resolveUserLimitBytes = async (userId: string): Promise<number | null> => {
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -64,7 +95,7 @@ export class FileService {
     });
 
     if (!folder) {
-      throw new Error(`Folder not found or you don't have access to it`);
+      throw new Error("Folder not found or you don't have access to it");
     }
 
     return folder.id;
@@ -72,6 +103,50 @@ export class FileService {
 
   private calculateContentHash(buffer: Buffer): string {
     return crypto.createHash('sha256').update(buffer).digest('hex');
+  }
+
+  private convertEmbeddingToBuffer(embedding: number[]): Buffer {
+    const floatArray = Float32Array.from(embedding);
+    const arrayBuffer = floatArray.buffer.slice(0);
+    return Buffer.from(arrayBuffer);
+  }
+
+  private async processAIEnhancements(
+    fileId: string,
+    userId: string,
+    buffer: Buffer,
+    filename: string
+  ): Promise<FileRecord | null> {
+    try {
+      const aiResponse = await pythonService.processFile(fileId, userId, buffer, filename);
+      if (!aiResponse?.success) {
+        return null;
+      }
+
+      const summary: string | null = aiResponse.summary ?? null;
+      const tagsArray: string[] | null = Array.isArray(aiResponse.tags)
+        ? aiResponse.tags.map((tag: unknown) => String(tag))
+        : null;
+      const embeddingArray: number[] | null = Array.isArray(aiResponse.embedding)
+        ? aiResponse.embedding
+        : null;
+
+      return await prisma.file.update({
+        where: { id: fileId },
+        data: {
+        summary,
+        tags: tagsArray && tagsArray.length ? JSON.stringify(tagsArray) : null,
+        embedding:
+          embeddingArray && embeddingArray.length
+            ? (this.convertEmbeddingToBuffer(embeddingArray) as any)
+            : null,
+        },
+        select: this.fileSelect,
+      }) as FileRecord;
+    } catch (error) {
+      console.warn('AI enhancement failed for file', fileId, error);
+      return null;
+    }
   }
 
   async uploadFile(
@@ -127,10 +202,15 @@ export class FileService {
           mimeType: file.mimetype,
           content: Buffer.from(file.buffer),
           updatedAt: new Date(),
+          summary: null,
+          tags: null,
+          embedding: null,
         },
-      });
+        select: this.fileSelect,
+      }) as FileRecord;
 
-      return { file: updatedFile };
+      const aiResult = await this.processAIEnhancements(parentFileId, userId, Buffer.from(file.buffer), file.originalname);
+      return { file: aiResult ?? updatedFile };
     }
 
     await this.ensureStorageAvailable(userId, file.size);
@@ -149,9 +229,12 @@ export class FileService {
         content: Buffer.from(file.buffer),
         contentHash,
       },
-    });
+      select: this.fileSelect,
+    }) as FileRecord;
 
-    return { file: createdFile };
+    const aiResult = await this.processAIEnhancements(createdFile.id, userId, Buffer.from(file.buffer), file.originalname);
+
+    return { file: aiResult ?? createdFile };
   }
 
   async getUserFiles(userId: string, includeDeleted = false, folderId?: string) {
@@ -164,18 +247,7 @@ export class FileService {
       orderBy: {
         updatedAt: 'desc',
       },
-      select: {
-        id: true,
-        name: true,
-        originalName: true,
-        folderId: true,
-        size: true,
-        mimeType: true,
-        isDeleted: true,
-        deletedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: this.fileSelect,
     });
 
     return files;
@@ -188,14 +260,7 @@ export class FileService {
         userId,
       },
       select: {
-        id: true,
-        name: true,
-        originalName: true,
-        size: true,
-        mimeType: true,
-        createdAt: true,
-        updatedAt: true,
-        folderId: true,
+        ...this.fileSelect,
         versions: {
           orderBy: {
             createdAt: 'desc',
@@ -250,6 +315,7 @@ export class FileService {
     if (permanent) {
       await prisma.fileVersion.deleteMany({ where: { fileId } });
       await prisma.file.delete({ where: { id: fileId } });
+      await pythonService.removeVector(fileId);
       return { message: 'File permanently deleted' };
     }
 
@@ -259,7 +325,10 @@ export class FileService {
         isDeleted: true,
         deletedAt: new Date(),
       },
+      select: this.fileSelect,
     });
+
+    await pythonService.removeVector(fileId);
 
     return deletedFile;
   }
@@ -283,9 +352,12 @@ export class FileService {
         isDeleted: false,
         deletedAt: null,
       },
+      select: this.fileSelect,
     });
 
-    return restoredFile;
+    const refreshed = await this.reprocessFile(fileId, userId);
+
+    return refreshed ?? restoredFile;
   }
 
   async getRecycleBin(userId: string) {
@@ -480,6 +552,37 @@ export class FileService {
       totalGroups: duplicatesWithPaths.length,
       totalWastedSpace,
     };
+  }
+
+  async reprocessFile(fileId: string, userId: string) {
+    const fileRecord = await prisma.file.findFirst({
+      where: { id: fileId, userId },
+      select: {
+        id: true,
+        originalName: true,
+        content: true,
+      },
+    });
+
+    if (!fileRecord || !fileRecord.content) {
+      throw new Error('File not found');
+    }
+
+    const aiResult = await this.processAIEnhancements(
+      fileId,
+      userId,
+      Buffer.from(fileRecord.content as Buffer),
+      fileRecord.originalName
+    );
+
+    if (aiResult) {
+      return aiResult;
+    }
+
+    return prisma.file.findUnique({
+      where: { id: fileId },
+      select: this.fileSelect,
+    });
   }
 }
 

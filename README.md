@@ -19,13 +19,17 @@ Storage usage visualization with configurable quotas
 View and download previous versions of any file
 User profile management
 Duplicate file detection with content hashing
-Optional Python microservice for advanced file analysis
+AI-powered file summarization and tagging
+Semantic search to find files by meaning, not just name
+Chat with your files using natural language questions
+Optional Python microservice for advanced file analysis and AI features
 
 Tech Stack
 
 Backend: Node.js, Express, TypeScript, Prisma ORM, SQLite, JWT, bcrypt
 Frontend: Next.js 16, React, TypeScript, TailwindCSS, Axios
-Optional Python Service: FastAPI, Pillow, PyPDF2, python-docx (for advanced file processing)
+AI Service: Python, FastAPI, sentence-transformers, ChromaDB, transformers, OpenAI API (optional)
+File Processing: Pillow, PyPDF2, python-docx, chardet, imagehash
 
 How to Run
 
@@ -95,9 +99,9 @@ npm run dev
 
 The frontend will start on http://localhost:3000
 
-Python Service Setup (Optional)
+Python AI Service Setup (Optional but Recommended)
 
-The Python service provides advanced file processing capabilities like image analysis, document text extraction, and thumbnail generation. The main application works perfectly without it.
+The Python service provides AI-powered features including automatic file summarization, keyword tagging, semantic search, and chat capabilities. It also handles image analysis, document text extraction, and thumbnail generation. The main application works without it, but AI features will be disabled.
 
 Navigate to the python-service folder:
 
@@ -105,9 +109,28 @@ Navigate to the python-service folder:
 cd python-service
 ```
 
-Install Python dependencies:
+Create a `.env` file for AI configuration (required for OpenAI):
 
 ```bash
+MODEL_PROVIDER=openai
+OPENAI_API_KEY=your_api_key_here
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+# Vector database path
+VECTOR_DB_PATH=./data/vectors
+
+# Only needed if you decide to run local models later
+# MODEL_PROVIDER=local
+# LOCAL_SUMMARIZATION_MODEL=sshleifer/distilbart-cnn-12-6
+# LOCAL_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+```
+
+Install Python dependencies inside a virtual environment:
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -119,16 +142,22 @@ python main.py
 
 The Python service will start on http://localhost:8000
 
+Note: When using OpenAI (recommended), the install is lightweight. Running fully local models requires additional packages and downloads several gigabytes the first time.
+
 Using the Application
 
 Open your web browser and go to http://localhost:3000
 Create a new account by clicking Sign up
 Log in with your credentials
 Start uploading files by dragging them into the upload area
-Click on any file to see its version history
+Files are automatically analyzed for AI summaries and tags (if Python service is running)
+Click on any file to see its version history, summary, and tags
+Use the search bar for semantic search to find files by meaning
+Click "Chat With Files" to ask natural language questions about your documents
 Deleted files go to the Recycle Bin where you can restore them
-Click Check Duplicates on the dashboard to find files with identical content
+Click "Check Duplicates" on the dashboard to find files with identical content
 Use folders to organize your files into a hierarchical structure
+Click "Refresh AI Summary" on any file to regenerate its summary and tags
 
 File Storage
 
@@ -160,8 +189,15 @@ GET /api/files/version/:versionId/download - Download specific version
 GET /api/files/recycle-bin/list - Get deleted files
 GET /api/files/stats - Get storage statistics
 GET /api/files/duplicates/scan - Find duplicate files by content hash
+
+Folders (all require authentication):
 POST /api/files/folders - Create a new folder
 GET /api/files/folders/tree - Get folder hierarchy
+
+AI Features (all require authentication and Python service):
+POST /api/ai/process/:fileId - Regenerate AI summary and tags for a file
+GET /api/ai/search?q=query - Semantic search across files by meaning
+POST /api/ai/chat - Chat with your files (body: { "question": "...", "top_k": 4 })
 
 Python Service (optional, requires service running):
 GET /api/files/python-service/status - Check if Python service is available
@@ -180,9 +216,20 @@ Database Structure
 The system uses four main tables:
 
 Users: Stores account information, hashed passwords, and per-user storage limits
-Files: Stores file metadata along with the binary content for the latest version and SHA-256 content hash for duplicate detection
+Files: Stores file metadata, binary content, SHA-256 content hash, AI-generated summaries, tags, and vector embeddings
 FileVersions: Keeps track of every previous revision and its binary payload
 Folders: Stores hierarchical folder structure for organizing files
+
+AI Features
+
+The system includes intelligent file analysis powered by machine learning:
+
+Automatic Summarization: When you upload text documents or PDFs, the system extracts text and generates a 2-3 sentence summary
+Keyword Tagging: Automatically identifies 3-5 relevant keywords from your document content
+Semantic Search: Find files by meaning, not just filename. Search for "quarterly metrics" and find files about "Q4 performance stats"
+Vector Embeddings: Each file's content is converted to a mathematical representation stored in ChromaDB for fast similarity matching
+Chat Interface: Ask questions like "What were the action items from last week's meeting?" and get answers with source file references
+Local or Cloud AI: Choose between free local models or OpenAI API for higher quality results
 
 Duplicate Detection
 

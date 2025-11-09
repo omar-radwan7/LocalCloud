@@ -34,16 +34,89 @@ class PythonService {
     return this.isAvailable;
   }
 
+  private async ensureAvailable(): Promise<boolean> {
+    if (!this.isAvailable) {
+      await this.checkAvailability();
+    }
+    return this.isAvailable;
+  }
+
+  async processFile(
+    fileId: string,
+    userId: string,
+    fileBuffer: Buffer,
+    filename: string
+  ): Promise<PythonServiceResponse | null> {
+    try {
+      if (!(await this.ensureAvailable())) return null;
+
+      const formData = new FormData();
+      formData.append('file_id', fileId);
+      formData.append('user_id', userId);
+      formData.append('filename', filename);
+      formData.append('file', fileBuffer, filename);
+
+      const response = await axios.post(`${this.baseURL}/ai/process`, formData, {
+        headers: formData.getHeaders(),
+        timeout: PYTHON_SERVICE_TIMEOUT * 2,
+      });
+
+      return response.data;
+    } catch (error) {
+      console.warn('Python service process file failed:', error);
+      return null;
+    }
+  }
+
+  async semanticSearch(query: string, topK = 5): Promise<PythonServiceResponse | null> {
+    try {
+      if (!(await this.ensureAvailable())) return null;
+      const response = await axios.get(`${this.baseURL}/ai/search`, {
+        params: { q: query, top_k: topK },
+        timeout: PYTHON_SERVICE_TIMEOUT * 2,
+      });
+      return response.data;
+    } catch (error) {
+      console.warn('Python service semantic search failed:', error);
+      return null;
+    }
+  }
+
+  async chat(question: string, topK = 4): Promise<PythonServiceResponse | null> {
+    try {
+      if (!(await this.ensureAvailable())) return null;
+      const response = await axios.post(
+        `${this.baseURL}/ai/chat`,
+        { question, top_k: topK },
+        { timeout: PYTHON_SERVICE_TIMEOUT * 3 }
+      );
+      return response.data;
+    } catch (error) {
+      console.warn('Python service chat failed:', error);
+      return null;
+    }
+  }
+
+  async removeVector(fileId: string): Promise<boolean> {
+    try {
+      if (!(await this.ensureAvailable())) return false;
+      await axios.delete(`${this.baseURL}/ai/vector/${fileId}`, {
+        timeout: PYTHON_SERVICE_TIMEOUT,
+      });
+      return true;
+    } catch (error) {
+      console.warn('Python service remove vector failed:', error);
+      return false;
+    }
+  }
+
   async generateThumbnail(
     fileBuffer: Buffer,
     filename: string,
     size: number = 200
   ): Promise<PythonServiceResponse | null> {
     try {
-      if (!this.isAvailable) {
-        await this.checkAvailability();
-        if (!this.isAvailable) return null;
-      }
+      if (!(await this.ensureAvailable())) return null;
 
       const formData = new FormData();
       formData.append('file', fileBuffer, filename);
@@ -62,10 +135,7 @@ class PythonService {
 
   async extractMetadata(fileBuffer: Buffer, filename: string): Promise<PythonServiceResponse | null> {
     try {
-      if (!this.isAvailable) {
-        await this.checkAvailability();
-        if (!this.isAvailable) return null;
-      }
+      if (!(await this.ensureAvailable())) return null;
 
       const formData = new FormData();
       formData.append('file', fileBuffer, filename);
@@ -84,10 +154,7 @@ class PythonService {
 
   async extractTextFromPDF(fileBuffer: Buffer, filename: string): Promise<PythonServiceResponse | null> {
     try {
-      if (!this.isAvailable) {
-        await this.checkAvailability();
-        if (!this.isAvailable) return null;
-      }
+      if (!(await this.ensureAvailable())) return null;
 
       const formData = new FormData();
       formData.append('file', fileBuffer, filename);
@@ -106,10 +173,7 @@ class PythonService {
 
   async extractTextFromDocx(fileBuffer: Buffer, filename: string): Promise<PythonServiceResponse | null> {
     try {
-      if (!this.isAvailable) {
-        await this.checkAvailability();
-        if (!this.isAvailable) return null;
-      }
+      if (!(await this.ensureAvailable())) return null;
 
       const formData = new FormData();
       formData.append('file', fileBuffer, filename);
@@ -128,10 +192,7 @@ class PythonService {
 
   async calculateImageHash(fileBuffer: Buffer, filename: string): Promise<PythonServiceResponse | null> {
     try {
-      if (!this.isAvailable) {
-        await this.checkAvailability();
-        if (!this.isAvailable) return null;
-      }
+      if (!(await this.ensureAvailable())) return null;
 
       const formData = new FormData();
       formData.append('file', fileBuffer, filename);
@@ -150,10 +211,7 @@ class PythonService {
 
   async analyzeFile(fileBuffer: Buffer, filename: string): Promise<PythonServiceResponse | null> {
     try {
-      if (!this.isAvailable) {
-        await this.checkAvailability();
-        if (!this.isAvailable) return null;
-      }
+      if (!(await this.ensureAvailable())) return null;
 
       const formData = new FormData();
       formData.append('file', fileBuffer, filename);

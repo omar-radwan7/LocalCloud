@@ -31,6 +31,9 @@ model File {
   mimeType     String?
   content      Bytes
   contentHash  String?
+  summary      String?
+  tags         String?
+  embedding    Bytes?
   isDeleted    Boolean       @default(false)
   deletedAt    DateTime?
   createdAt    DateTime      @default(now())

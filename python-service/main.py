@@ -1,16 +1,33 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from PIL import Image
 import io
 import magic
 import PyPDF2
 import docx
 import imagehash
-from typing import Optional
+from typing import Optional, List
 import base64
 
-app = FastAPI(title="LocalCloud Python Service", version="1.0.0")
+from ai import (
+    AISettings,
+    ChatManager,
+    EmbeddingManager,
+    Summarizer,
+    Tagger,
+    extract_text,
+    get_settings,
+)
+
+settings = get_settings()
+summarizer = Summarizer(settings)
+tagger = Tagger(settings)
+embedding_manager = EmbeddingManager(settings)
+chat_manager = ChatManager(settings)
+
+app = FastAPI(title="LocalCloud Python Service", version="2.0.0")
 
 # CORS middleware to allow Node.js backend to call this service
 app.add_middleware(
@@ -22,11 +39,16 @@ app.add_middleware(
 )
 
 
+class ChatRequest(BaseModel):
+    question: str
+    top_k: int | None = 4
+
+
 @app.get("/")
 async def root():
     return {
         "service": "LocalCloud Python Service",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "status": "running",
         "features": [
             "Image thumbnail generation",
@@ -34,6 +56,9 @@ async def root():
             "Text extraction from PDFs",
             "Text extraction from DOCX",
             "Duplicate image detection",
+            "AI summarisation and tagging",
+            "Semantic search",
+            "Chat with your files",
         ],
     }
 
@@ -41,6 +66,68 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.post("/ai/process")
+async def process_file(
+    file_id: str = Form(...),
+    user_id: Optional[str] = Form(None),
+    filename: Optional[str] = Form(None),
+    file: UploadFile = File(...),
+):
+    try:
+        contents = await file.read()
+        text, mime_type = extract_text(contents, filename or file.filename)
+        summary = await summarizer.summarize(text)
+        tags = await tagger.generate_tags(text)
+        embedding = await embedding_manager.upsert_document(
+            file_id=file_id,
+            text=text,
+            metadata={
+                "file_id": file_id,
+                "user_id": user_id or "",
+                "filename": filename or file.filename,
+            },
+        )
+
+        return {
+            "success": True,
+            "file_id": file_id,
+            "summary": summary,
+            "tags": tags,
+            "embedding": embedding,
+            "text_preview": text[:1000],
+            "mime_type": mime_type,
+        }
+    except Exception as exc:  # pragma: no cover - runtime failure
+        raise HTTPException(status_code=400, detail=f"Failed to process file: {exc}")
+
+
+@app.get("/ai/search")
+async def semantic_search(q: str = Query(..., description="Search query"), top_k: int = 5):
+    try:
+        results = await embedding_manager.search(q, top_k=top_k)
+        return {"success": True, "results": results}
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=400, detail=f"Semantic search failed: {exc}")
+
+
+@app.delete("/ai/vector/{file_id}")
+async def delete_vector(file_id: str):
+    try:
+        embedding_manager.delete_document(file_id)
+        return {"success": True}
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=400, detail=f"Failed to delete vector: {exc}")
+
+
+@app.post("/ai/chat")
+async def chat_with_files(request: ChatRequest):
+    try:
+        response = await chat_manager.chat(request.question, top_k=request.top_k or 4)
+        return {"success": True, **response}
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=400, detail=f"Chat failed: {exc}")
 
 
 @app.post("/api/thumbnail")
