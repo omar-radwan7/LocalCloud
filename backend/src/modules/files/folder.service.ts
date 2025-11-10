@@ -47,7 +47,7 @@ export class FolderService {
 
   async getFolderTree(userId: string): Promise<FolderNode[]> {
     const folders = await prisma.folder.findMany({
-      where: { userId },
+      where: { userId, isDeleted: false },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -91,5 +91,103 @@ export class FolderService {
     });
 
     return roots;
+  }
+
+  async deleteFolder(userId: string, folderId: string) {
+    const folder = await prisma.folder.findFirst({
+      where: { id: folderId, userId, isDeleted: false },
+      select: { id: true },
+    });
+    if (!folder) {
+      throw new Error('Folder not found');
+    }
+
+    // Get all descendant folders
+    const allFolders = await prisma.folder.findMany({
+      where: { userId, isDeleted: false },
+      select: { id: true, parentId: true },
+    });
+
+    const collectSubtree = (rootId: string): string[] => {
+      const children = allFolders.filter((f) => f.parentId === rootId);
+      return [rootId, ...children.flatMap((child) => collectSubtree(child.id))];
+    };
+
+    const subtreeIds = collectSubtree(folderId);
+
+    // Soft delete all files in the folder subtree
+    await prisma.file.updateMany({
+      where: {
+        userId,
+        folderId: { in: subtreeIds },
+        isDeleted: false,
+      },
+      data: {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+    });
+
+    // Soft delete folder subtree
+    await prisma.folder.updateMany({
+      where: { userId, id: { in: subtreeIds } },
+      data: { isDeleted: true, deletedAt: new Date() },
+    });
+
+    return { success: true };
+  }
+
+  async listDeletedFolders(userId: string): Promise<Array<{ id: string; name: string; deletedAt: Date }>> {
+    const folders = await prisma.folder.findMany({
+      where: { userId, isDeleted: true },
+      select: { id: true, name: true, deletedAt: true },
+      orderBy: { deletedAt: 'desc' },
+    });
+    return folders.map((f) => ({
+      id: f.id,
+      name: f.name,
+      deletedAt: f.deletedAt || new Date(0),
+    }));
+  }
+
+  async restoreFolder(folderId: string, userId: string): Promise<any> {
+    // Verify folder exists and is deleted
+    const folder = await prisma.folder.findFirst({
+      where: { id: folderId, userId, isDeleted: true },
+    });
+
+    if (!folder) {
+      throw new Error('Folder not found in recycle bin');
+    }
+
+    // Get all folders (including deleted ones) to find descendants
+    const allFolders = await prisma.folder.findMany({
+      where: { userId },
+      select: { id: true, parentId: true, isDeleted: true },
+    });
+
+    const collectSubtree = (rootId: string): string[] => {
+      const children = allFolders.filter((f) => f.parentId === rootId);
+      return [rootId, ...children.flatMap((child) => collectSubtree(child.id))];
+    };
+
+    const subtreeIds = collectSubtree(folderId);
+
+    // Restore all files in the folder subtree
+    await prisma.file.updateMany({
+      where: { userId, folderId: { in: subtreeIds }, isDeleted: true },
+      data: {
+        isDeleted: false,
+        deletedAt: null,
+      },
+    });
+
+    // Restore folder subtree
+    await prisma.folder.updateMany({
+      where: { userId, id: { in: subtreeIds } },
+      data: { isDeleted: false, deletedAt: null },
+    });
+
+    return folder;
   }
 }

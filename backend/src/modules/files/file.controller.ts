@@ -35,6 +35,22 @@ export class FileController {
     }
   }
 
+  async deleteFolder(req: AuthRequest, res: Response) {
+    try {
+      if (!req.userId) {
+        return errorResponse(res, 'Unauthorized', 401);
+      }
+      const { folderId } = req.params;
+      if (!folderId) {
+        return errorResponse(res, 'Folder ID is required', 400);
+      }
+      const result = await folderService.deleteFolder(req.userId, folderId);
+      return successResponse(res, result, 'Folder deleted successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message, 400);
+    }
+  }
+
   async uploadVersion(req: AuthRequest, res: Response) {
     try {
       if (!req.userId) {
@@ -316,6 +332,32 @@ export class FileController {
 
       const duplicates = await fileService.findDuplicates(req.userId);
       return successResponse(res, duplicates, 'Duplicate files retrieved successfully');
+    } catch (error: any) {
+      return errorResponse(res, error.message, 400);
+    }
+  }
+
+  async listDeletedFolders(req: AuthRequest, res: Response) {
+    try {
+      if (!req.userId) {
+        return errorResponse(res, 'Unauthorized', 401);
+      }
+      const folders = await folderService.listDeletedFolders(req.userId);
+      return successResponse(res, folders);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 400);
+    }
+  }
+
+  async restoreFolder(req: AuthRequest, res: Response) {
+    try {
+      if (!req.userId) {
+        return errorResponse(res, 'Unauthorized', 401);
+      }
+
+      const { folderId } = req.params;
+      const result = await folderService.restoreFolder(folderId, req.userId);
+      return successResponse(res, result, 'Folder restored successfully');
     } catch (error: any) {
       return errorResponse(res, error.message, 400);
     }

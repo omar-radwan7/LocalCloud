@@ -20,6 +20,9 @@ router.get('/stats', (req, res) => fileController.getStorageStats(req, res));
 // Folder operations
 router.post('/folders', (req, res) => fileController.createFolder(req, res));
 router.get('/folders/tree', (req, res) => fileController.getFolderTree(req, res));
+router.delete('/folders/:folderId', (req, res) => fileController.deleteFolder(req, res));
+router.get('/folders/bin', (req, res) => fileController.listDeletedFolders(req, res));
+router.post('/folders/:folderId/restore', (req, res) => fileController.restoreFolder(req, res));
 
 router.get('/recycle-bin/list', (req, res) => fileController.getRecycleBin(req, res));
 router.post('/:fileId/restore', (req, res) => fileController.restoreFile(req, res));
